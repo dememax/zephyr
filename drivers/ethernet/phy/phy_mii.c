@@ -341,6 +341,7 @@ static void monitor_work_handler(struct k_work *work)
 	struct phy_mii_dev_data *const data =
 		CONTAINER_OF(dwork, struct phy_mii_dev_data, monitor_work);
 	const struct device *dev = data->dev;
+	const struct phy_mii_dev_config *const cfg = dev->config;
 	int rc;
 
 	if (k_sem_take(&data->sem, K_NO_WAIT) == 0) {
@@ -351,7 +352,25 @@ static void monitor_work_handler(struct k_work *work)
 			rc = update_link_state(dev);
 		}
 
-		data->autoneg_in_progress = (rc == -EINPROGRESS);
+		if (rc == -ETIMEDOUT) {
+			/* Autoneg timed out — some switches/routers (e.g. with STP) need
+			 * more than one attempt. Write AUTONEG_RESTART to kick the hardware
+			 * and reset the software window so we keep trying indefinitely.
+			 */
+			uint16_t bmcr = 0;
+
+			LOG_DBG("PHY (%d) autoneg timed out, restarting hardware autoneg",
+				cfg->phy_addr);
+			if (phy_mii_reg_read(dev, MII_BMCR, &bmcr) == 0) {
+				phy_mii_reg_write(dev, MII_BMCR,
+						  bmcr | MII_BMCR_AUTONEG_RESTART);
+			}
+			data->autoneg_in_progress = true;
+			data->autoneg_timeout =
+				sys_timepoint_calc(K_MSEC(CONFIG_PHY_AUTONEG_TIMEOUT_MS));
+		} else {
+			data->autoneg_in_progress = (rc == -EINPROGRESS);
+		}
 
 		k_sem_give(&data->sem);
 
