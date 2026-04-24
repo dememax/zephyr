@@ -187,6 +187,11 @@ static int update_link_state(const struct device *dev)
 		return -EIO;
 	}
 
+	LOG_DBG("PHY (%d) update_link_state: raw BMSR=0x%04X (link_bit=%d, 0xFFFF=%s)",
+		cfg->phy_addr, bmsr_reg,
+		(int)IS_BIT_SET(bmsr_reg, MII_BMSR_LINK_STATUS_BIT),
+		bmsr_reg == 0xFFFF ? "YES-dead-bus" : "no");
+
 	link_up = IS_BIT_SET(bmsr_reg, MII_BMSR_LINK_STATUS_BIT);
 	/* If link is down, we can stop here. */
 	if (!link_up) {
@@ -253,6 +258,12 @@ static int check_autonegotiation_completion(const struct device *dev)
 	if (phy_mii_reg_read(dev, MII_BMSR, &bmsr_reg) < 0) {
 		return -EIO;
 	}
+
+	LOG_DBG("PHY (%d) check_autoneg: raw BMSR=0x%04X (autoneg_done=%d, link=%d, 0xFFFF=%s)",
+		cfg->phy_addr, bmsr_reg,
+		(int)IS_BIT_SET(bmsr_reg, MII_BMSR_AUTONEG_COMPLETE_BIT),
+		(int)IS_BIT_SET(bmsr_reg, MII_BMSR_LINK_STATUS_BIT),
+		bmsr_reg == 0xFFFF ? "YES-dead-bus" : "no");
 
 	if (!IS_BIT_SET(bmsr_reg, MII_BMSR_AUTONEG_COMPLETE_BIT)) {
 		if (sys_timepoint_expired(data->autoneg_timeout)) {
