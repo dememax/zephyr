@@ -55,6 +55,10 @@ struct phy_mii_dev_data {
 /* How often to poll auto-negotiation status while waiting for it to complete */
 #define MII_AUTONEG_POLL_INTERVAL_MS 100
 
+/* ANER (Auto-Negotiation Expansion Register) bit positions — not in <zephyr/net/mii.h> */
+#define MII_ANER_LP_AN_ABLE_BIT 0   /* Link Partner sent decodable FLPs */
+#define MII_ANER_PDF_BIT        4   /* Parallel Detection Fault */
+
 static void invoke_link_cb(const struct device *dev);
 
 static int check_autonegotiation_completion(const struct device *dev);
@@ -216,6 +220,11 @@ static int update_link_state(const struct device *dev)
 			data->state.is_up = true;
 			data->state.speed = new_speed;
 
+			LOG_DBG("PHY (%d) forced link up: BMCR=0x%04X "
+				"(local_full_duplex=%d — remote duplex not observable via MDIO)",
+				cfg->phy_addr, bmcr_reg,
+				(int)IS_BIT_SET(bmcr_reg, MII_BMCR_DUPLEX_MODE_BIT));
+
 			LOG_INF("PHY (%d) Link speed %s Mb, %s duplex",
 				cfg->phy_addr,
 				PHY_LINK_IS_SPEED_1000M(data->state.speed) ? "1000" :
@@ -267,7 +276,30 @@ static int check_autonegotiation_completion(const struct device *dev)
 
 	if (!IS_BIT_SET(bmsr_reg, MII_BMSR_AUTONEG_COMPLETE_BIT)) {
 		if (sys_timepoint_expired(data->autoneg_timeout)) {
-			LOG_DBG("PHY (%d) auto-negotiate timeout", cfg->phy_addr);
+			uint16_t aner_reg = 0;
+
+			phy_mii_reg_read(dev, MII_ANAR,   &anar_reg);
+			phy_mii_reg_read(dev, MII_ANLPAR, &anlpar_reg);
+			phy_mii_reg_read(dev, MII_ANER,   &aner_reg);
+			/* ANAR: what we sent in our FLPs */
+			LOG_DBG("PHY (%d) autoneg timeout ANAR=0x%04X "
+				"(our_100fdx=%d our_100hdx=%d our_10fdx=%d our_10hdx=%d)",
+				cfg->phy_addr, anar_reg,
+				(int)IS_BIT_SET(anar_reg, MII_ADVERTISE_100_FULL_BIT),
+				(int)IS_BIT_SET(anar_reg, MII_ADVERTISE_100_HALF_BIT),
+				(int)IS_BIT_SET(anar_reg, MII_ADVERTISE_10_FULL_BIT),
+				(int)IS_BIT_SET(anar_reg, MII_ADVERTISE_10_HALF_BIT));
+			/* ANLPAR: what the partner sent; ANER: whether it sent anything */
+			LOG_DBG("PHY (%d) autoneg timeout ANLPAR=0x%04X ANER=0x%04X "
+				"(lp_autoneg_able=%d, parallel_detect_fault=%d, "
+				"lp_100fdx=%d lp_100hdx=%d lp_10fdx=%d lp_10hdx=%d)",
+				cfg->phy_addr, anlpar_reg, aner_reg,
+				(int)IS_BIT_SET(aner_reg, MII_ANER_LP_AN_ABLE_BIT),
+				(int)IS_BIT_SET(aner_reg, MII_ANER_PDF_BIT),
+				(int)IS_BIT_SET(anlpar_reg, MII_ADVERTISE_100_FULL_BIT),
+				(int)IS_BIT_SET(anlpar_reg, MII_ADVERTISE_100_HALF_BIT),
+				(int)IS_BIT_SET(anlpar_reg, MII_ADVERTISE_10_FULL_BIT),
+				(int)IS_BIT_SET(anlpar_reg, MII_ADVERTISE_10_HALF_BIT));
 			return -ETIMEDOUT;
 		}
 		return -EINPROGRESS;
@@ -536,6 +568,20 @@ static int phy_mii_init(const struct device *dev)
 	if (ret == -EALREADY) {
 		data->autoneg_in_progress = true;
 		data->autoneg_timeout = sys_timepoint_calc(K_MSEC(CONFIG_PHY_AUTONEG_TIMEOUT_MS));
+	}
+
+	{
+		uint16_t anar_reg = 0;
+
+		if (phy_mii_reg_read(dev, MII_ANAR, &anar_reg) == 0) {
+			LOG_DBG("PHY (%d) ANAR=0x%04X "
+				"(advertising: 100fdx=%d 100hdx=%d 10fdx=%d 10hdx=%d)",
+				cfg->phy_addr, anar_reg,
+				(int)IS_BIT_SET(anar_reg, MII_ADVERTISE_100_FULL_BIT),
+				(int)IS_BIT_SET(anar_reg, MII_ADVERTISE_100_HALF_BIT),
+				(int)IS_BIT_SET(anar_reg, MII_ADVERTISE_10_FULL_BIT),
+				(int)IS_BIT_SET(anar_reg, MII_ADVERTISE_10_HALF_BIT));
+		}
 	}
 
 	/* This will schedule the monitor work, if not already scheduled by phy_mii_cfg_link(). */
