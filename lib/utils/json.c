@@ -358,6 +358,7 @@ static int element_token(enum json_tokens token)
 	case JSON_TOK_OBJ_ARRAY:
 	case JSON_TOK_TRUE:
 	case JSON_TOK_FALSE:
+	case JSON_TOK_NULL:
 		return 0;
 	default:
 		return -EINVAL;

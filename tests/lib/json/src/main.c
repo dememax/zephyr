@@ -1903,13 +1903,32 @@ ZTEST(lib_json_test, test_json_invalid_bool)
 ZTEST(lib_json_test, test_json_invalid_null)
 {
 	struct encoding_test encoded[] = {
-		/* Parser will recognize 'null', but refuse to decode it */
+		/* Known field receiving null is a type mismatch → -EINVAL */
 		{ "{\"some_string\":null }", -EINVAL},
 		/* Null spelled wrong */
 		{ "{\"some_string\":nutella }", -EINVAL},
 	};
 
 	parse_harness(encoded, ARRAY_SIZE(encoded));
+}
+
+ZTEST(lib_json_test, test_json_unknown_field_null_skipped)
+{
+	/* An unknown field whose value is JSON null must be silently skipped;
+	 * known fields following it must still be decoded correctly.
+	 * Regression for https://github.com/zephyrproject-rtos/zephyr/issues/27600:
+	 * element_token() did not list JSON_TOK_NULL, so obj_next() returned
+	 * -EINVAL before skip_field() was ever reached.
+	 */
+	struct test_struct ts = {};
+	char encoded[] = "{\"unknown_null_field\":null,\"some_int\":42}";
+	int ret;
+
+	ret = json_obj_parse(encoded, strlen(encoded),
+			     test_descr, ARRAY_SIZE(test_descr), &ts);
+	zassert_true(ret > 0, "parse failed with %d, expected >0", ret);
+	zassert_equal(ts.some_int, 42,
+		      "some_int not decoded: unknown null field was not skipped");
 }
 
 ZTEST(lib_json_test, test_json_invalid_number)
